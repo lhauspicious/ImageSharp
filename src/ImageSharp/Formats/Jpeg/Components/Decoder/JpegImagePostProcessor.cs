@@ -1,15 +1,13 @@
-// Copyright (c) Six Labors and contributors.
+// Copyright (c) Six Labors.
 // Licensed under the Apache License, Version 2.0.
 
 using System;
 using System.Buffers;
-using System.Linq;
 using System.Numerics;
+using System.Threading;
 using SixLabors.ImageSharp.Advanced;
 using SixLabors.ImageSharp.Memory;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.Memory;
-using SixLabors.Primitives;
 using JpegColorConverter = SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder.ColorConverters.JpegColorConverter;
 
 namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
@@ -22,7 +20,7 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
     /// (4) Packing <see cref="Image{TPixel}"/> pixels from the <see cref="Vector4"/> buffer. <br/>
     /// These operations are executed in <see cref="NumberOfPostProcessorSteps"/> steps.
     /// <see cref="PixelRowsPerStep"/> image rows are converted in one step,
-    /// which means that size of the allocated memory is limited (does not depend on <see cref="ImageFrame{TPixel}.Height"/>).
+    /// which means that size of the allocated memory is limited (does not depend on <see cref="ImageFrame.Height"/>).
     /// </summary>
     internal class JpegImagePostProcessor : IDisposable
     {
@@ -57,14 +55,20 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
         {
             this.configuration = configuration;
             this.RawJpeg = rawJpeg;
-            IJpegComponent c0 = rawJpeg.Components.First();
+            IJpegComponent c0 = rawJpeg.Components[0];
             this.NumberOfPostProcessorSteps = c0.SizeInBlocks.Height / BlockRowsPerStep;
             this.PostProcessorBufferSize = new Size(c0.SizeInBlocks.Width * 8, PixelRowsPerStep);
 
             MemoryAllocator memoryAllocator = configuration.MemoryAllocator;
-            this.ComponentProcessors = rawJpeg.Components.Select(c => new JpegComponentPostProcessor(memoryAllocator, this, c)).ToArray();
+
+            this.ComponentProcessors = new JpegComponentPostProcessor[rawJpeg.Components.Length];
+            for (int i = 0; i < rawJpeg.Components.Length; i++)
+            {
+                this.ComponentProcessors[i] = new JpegComponentPostProcessor(memoryAllocator, this, rawJpeg.Components[i]);
+            }
+
             this.rgbaBuffer = memoryAllocator.Allocate<Vector4>(rawJpeg.ImageSizeInPixels.Width);
-            this.colorConverter = JpegColorConverter.GetConverter(rawJpeg.ColorSpace);
+            this.colorConverter = JpegColorConverter.GetConverter(rawJpeg.ColorSpace, rawJpeg.Precision);
         }
 
         /// <summary>
@@ -108,8 +112,9 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
         /// </summary>
         /// <typeparam name="TPixel">The pixel type</typeparam>
         /// <param name="destination">The destination image</param>
-        public void PostProcess<TPixel>(ImageFrame<TPixel> destination)
-            where TPixel : struct, IPixel<TPixel>
+        /// <param name="cancellationToken">The token to request cancellation.</param>
+        public void PostProcess<TPixel>(ImageFrame<TPixel> destination, CancellationToken cancellationToken)
+            where TPixel : unmanaged, IPixel<TPixel>
         {
             this.PixelRowCounter = 0;
 
@@ -120,6 +125,7 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
 
             while (this.PixelRowCounter < this.RawJpeg.ImageSizeInPixels.Height)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 this.DoPostProcessorStep(destination);
             }
         }
@@ -130,7 +136,7 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
         /// <typeparam name="TPixel">The pixel type</typeparam>
         /// <param name="destination">The destination image.</param>
         public void DoPostProcessorStep<TPixel>(ImageFrame<TPixel> destination)
-            where TPixel : struct, IPixel<TPixel>
+            where TPixel : unmanaged, IPixel<TPixel>
         {
             foreach (JpegComponentPostProcessor cpp in this.ComponentProcessors)
             {
@@ -148,11 +154,15 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
         /// <typeparam name="TPixel">The pixel type</typeparam>
         /// <param name="destination">The destination image</param>
         private void ConvertColorsInto<TPixel>(ImageFrame<TPixel> destination)
-            where TPixel : struct, IPixel<TPixel>
+            where TPixel : unmanaged, IPixel<TPixel>
         {
             int maxY = Math.Min(destination.Height, this.PixelRowCounter + PixelRowsPerStep);
 
-            Buffer2D<float>[] buffers = this.ComponentProcessors.Select(cp => cp.ColorBuffer).ToArray();
+            var buffers = new Buffer2D<float>[this.ComponentProcessors.Length];
+            for (int i = 0; i < this.ComponentProcessors.Length; i++)
+            {
+                buffers[i] = this.ComponentProcessors[i].ColorBuffer;
+            }
 
             for (int yy = this.PixelRowCounter; yy < maxY; yy++)
             {
@@ -164,7 +174,7 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
                 Span<TPixel> destRow = destination.GetPixelRowSpan(yy);
 
                 // TODO: Investigate if slicing is actually necessary
-                PixelOperations<TPixel>.Instance.FromVector4(this.configuration, this.rgbaBuffer.GetSpan().Slice(0, destRow.Length), destRow);
+                PixelOperations<TPixel>.Instance.FromVector4Destructive(this.configuration, this.rgbaBuffer.GetSpan().Slice(0, destRow.Length), destRow);
             }
         }
     }

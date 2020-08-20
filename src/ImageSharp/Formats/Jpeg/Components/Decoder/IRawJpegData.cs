@@ -1,10 +1,7 @@
-// Copyright (c) Six Labors and contributors.
+// Copyright (c) Six Labors.
 // Licensed under the Apache License, Version 2.0.
 
 using System;
-using System.Collections.Generic;
-
-using SixLabors.Primitives;
 
 namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
 {
@@ -30,9 +27,14 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder
         JpegColorSpace ColorSpace { get; }
 
         /// <summary>
+        /// Gets the number of bits used for precision.
+        /// </summary>
+        int Precision { get; }
+
+        /// <summary>
         /// Gets the components.
         /// </summary>
-        IEnumerable<IJpegComponent> Components { get; }
+        IJpegComponent[] Components { get; }
 
         /// <summary>
         /// Gets the quantization tables, in zigzag order.

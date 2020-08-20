@@ -1,4 +1,4 @@
-﻿// Copyright (c) Six Labors and contributors.
+// Copyright (c) Six Labors.
 // Licensed under the Apache License, Version 2.0.
 
 using System;
@@ -12,10 +12,10 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder.ColorConverters
 {
     internal abstract partial class JpegColorConverter
     {
-        internal class FromYCbCrSimd : JpegColorConverter
+        internal sealed class FromYCbCrSimd : JpegColorConverter
         {
-            public FromYCbCrSimd()
-                : base(JpegColorSpace.YCbCr)
+            public FromYCbCrSimd(int precision)
+                : base(JpegColorSpace.YCbCr, precision)
             {
             }
 
@@ -25,16 +25,16 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder.ColorConverters
                 int simdCount = result.Length - remainder;
                 if (simdCount > 0)
                 {
-                    ConvertCore(values.Slice(0, simdCount), result.Slice(0, simdCount));
+                    ConvertCore(values.Slice(0, simdCount), result.Slice(0, simdCount), this.MaximumValue, this.HalfValue);
                 }
 
-                FromYCbCrBasic.ConvertCore(values.Slice(simdCount, remainder), result.Slice(simdCount, remainder));
+                FromYCbCrBasic.ConvertCore(values.Slice(simdCount, remainder), result.Slice(simdCount, remainder), this.MaximumValue, this.HalfValue);
             }
 
             /// <summary>
             /// SIMD convert using buffers of sizes divisible by 8.
             /// </summary>
-            internal static void ConvertCore(in ComponentValues values, Span<Vector4> result)
+            internal static void ConvertCore(in ComponentValues values, Span<Vector4> result, float maxValue, float halfValue)
             {
                 DebugGuard.IsTrue(result.Length % 8 == 0, nameof(result), "result.Length should be divisible by 8!");
 
@@ -48,7 +48,7 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder.ColorConverters
                 ref Vector4Octet resultBase =
                     ref Unsafe.As<Vector4, Vector4Octet>(ref MemoryMarshal.GetReference(result));
 
-                var chromaOffset = new Vector4(-128f);
+                var chromaOffset = new Vector4(-halfValue);
 
                 // Walking 8 elements at one step:
                 int n = result.Length / 8;
@@ -58,11 +58,11 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder.ColorConverters
                     // y = yVals[i];
                     Vector4Pair y = Unsafe.Add(ref yBase, i);
 
-                    // cb = cbVals[i] - 128F;
+                    // cb = cbVals[i] - halfValue);
                     Vector4Pair cb = Unsafe.Add(ref cbBase, i);
                     cb.AddInplace(chromaOffset);
 
-                    // cr = crVals[i] - 128F;
+                    // cr = crVals[i] - halfValue;
                     Vector4Pair cr = Unsafe.Add(ref crBase, i);
                     cr.AddInplace(chromaOffset);
 
@@ -90,21 +90,21 @@ namespace SixLabors.ImageSharp.Formats.Jpeg.Components.Decoder.ColorConverters
                     if (Vector<float>.Count == 4)
                     {
                         // TODO: Find a way to properly run & test this path on AVX2 PC-s! (Have I already mentioned that Vector<T> is terrible?)
-                        r.RoundAndDownscalePreAvx2();
-                        g.RoundAndDownscalePreAvx2();
-                        b.RoundAndDownscalePreAvx2();
+                        r.RoundAndDownscalePreVector8(maxValue);
+                        g.RoundAndDownscalePreVector8(maxValue);
+                        b.RoundAndDownscalePreVector8(maxValue);
                     }
-                    else if (SimdUtils.IsAvx2CompatibleArchitecture)
+                    else if (SimdUtils.HasVector8)
                     {
-                        r.RoundAndDownscaleAvx2();
-                        g.RoundAndDownscaleAvx2();
-                        b.RoundAndDownscaleAvx2();
+                        r.RoundAndDownscaleVector8(maxValue);
+                        g.RoundAndDownscaleVector8(maxValue);
+                        b.RoundAndDownscaleVector8(maxValue);
                     }
                     else
                     {
                         // TODO: Run fallback scalar code here
                         // However, no issues expected before someone implements this: https://github.com/dotnet/coreclr/issues/12007
-                        throw new NotImplementedException("Your CPU architecture is too modern!");
+                        JpegThrowHelper.ThrowNotImplementedException("Your CPU architecture is too modern!");
                     }
 
                     // Collect (r0,r1...r8) (g0,g1...g8) (b0,b1...b8) vector values in the expected (r0,g0,g1,1), (r1,g1,g2,1) ... order:

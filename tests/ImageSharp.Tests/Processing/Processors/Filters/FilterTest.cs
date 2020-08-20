@@ -1,16 +1,13 @@
-﻿// Copyright (c) Six Labors and contributors.
+// Copyright (c) Six Labors.
 // Licensed under the Apache License, Version 2.0.
 
-using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Tests.TestUtilities.ImageComparison;
-
-using SixLabors.Primitives;
 using Xunit;
 
 namespace SixLabors.ImageSharp.Tests.Processing.Processors.Filters
 {
+    using SixLabors.ImageSharp;
     using SixLabors.ImageSharp.Processing;
 
     [GroupOutput("Filters")]
@@ -23,9 +20,9 @@ namespace SixLabors.ImageSharp.Tests.Processing.Processors.Filters
         [Theory]
         [WithTestPatternImages(48, 48, PixelTypes.Rgba32 | PixelTypes.Bgra32)]
         public void ApplyFilter<TPixel>(TestImageProvider<TPixel> provider)
-            where TPixel : struct, IPixel<TPixel>
+            where TPixel : unmanaged, IPixel<TPixel>
         {
-            Matrix4x4 m = CreateCombinedTestFilterMatrix();
+            ColorMatrix m = CreateCombinedTestFilterMatrix();
 
             provider.RunValidatingProcessorTest(x => x.Filter(m), comparer: ValidatorComparer);
         }
@@ -33,21 +30,29 @@ namespace SixLabors.ImageSharp.Tests.Processing.Processors.Filters
         [Theory]
         [WithTestPatternImages(48, 48, PixelTypes.Rgba32)]
         public void ApplyFilterInBox<TPixel>(TestImageProvider<TPixel> provider)
-            where TPixel : struct, IPixel<TPixel>
+            where TPixel : unmanaged, IPixel<TPixel>
         {
-            Matrix4x4 m = CreateCombinedTestFilterMatrix();
+            ColorMatrix m = CreateCombinedTestFilterMatrix();
 
             provider.RunRectangleConstrainedValidatingProcessorTest((x, b) => x.Filter(m, b), comparer: ValidatorComparer);
         }
 
-        private static Matrix4x4 CreateCombinedTestFilterMatrix()
+        [Theory]
+        [WithTestPatternImages(70, 120, PixelTypes.Rgba32)]
+        public void FilterProcessor_WorksWithDiscoBuffers<TPixel>(TestImageProvider<TPixel> provider)
+            where TPixel : unmanaged, IPixel<TPixel>
         {
-            Matrix4x4 brightness = KnownFilterMatrices.CreateBrightnessFilter(0.9F);
-            Matrix4x4 hue = KnownFilterMatrices.CreateHueFilter(180F);
-            Matrix4x4 saturation = KnownFilterMatrices.CreateSaturateFilter(1.5F);
-            Matrix4x4 m = brightness * hue * saturation;
-            return m;
+            ColorMatrix m = CreateCombinedTestFilterMatrix();
+
+            provider.RunBufferCapacityLimitProcessorTest(37, c => c.Filter(m));
         }
 
+        private static ColorMatrix CreateCombinedTestFilterMatrix()
+        {
+            ColorMatrix brightness = KnownFilterMatrices.CreateBrightnessFilter(0.9F);
+            ColorMatrix hue = KnownFilterMatrices.CreateHueFilter(180F);
+            ColorMatrix saturation = KnownFilterMatrices.CreateSaturateFilter(1.5F);
+            return brightness * hue * saturation;
+        }
     }
 }
